@@ -1,7 +1,7 @@
-FROM node:22-alpine
+FROM python:3.12-alpine
 WORKDIR /app
-COPY package.json ./
-COPY server.js ./
+COPY server.py ./
 COPY public ./public
+RUN mkdir -p data
 EXPOSE 3000
-CMD ["npm","start"]
+CMD ["python3","server.py"]

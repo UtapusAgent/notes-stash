@@ -1,21 +1,23 @@
-const meta={"name":"Notes App","slug":"notes-stash","features":["Create notes","Search notes","Delete notes","Local persistence"]};
-const key="slop:"+meta.slug;
-const $=(s)=>document.querySelector(s);
-const state=JSON.parse(localStorage.getItem(key)||"[]");
-function save(){localStorage.setItem(key,JSON.stringify(state));render();}
-function add(){
-  const text=$("#text").value.trim();
-  if(!text)return;
-  state.unshift({id:Date.now(),text,done:false,tag:$("#tag")?.value||"misc",created:new Date().toLocaleString()});
-  $("#text").value="";
-  save();
-}
-function render(){
-  $("#items").innerHTML=state.map((x,i)=>`<div class="card"><div class="row"><strong class="${x.done?"done":""}">${escapeHtml(x.text)}</strong><span class="muted">${escapeHtml(x.tag||"item")}</span></div><p class="muted">${x.created||""}</p><button onclick="toggle(${i})">toggle</button> <button class="secondary" onclick="del(${i})">delete</button></div>`).join("")||"<p class='muted'>Nothing here yet.</p>";
-}
-function toggle(i){state[i].done=!state[i].done;save();}
-function del(i){state.splice(i,1);save();}
-function escapeHtml(s){return String(s).replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
-window.add=add;window.toggle=toggle;window.del=del;
-$("#app").innerHTML=`<section class="card"><h2>${meta.name}</h2><p class="muted">${meta.features.join(" / ")}</p><div class="row"><input id="text" placeholder="Add something"><input id="tag" placeholder="tag"><button onclick="add()">Add</button></div></section><section id="items"></section>`;
-render();
+const $=s=>document.querySelector(s);let items=[],editing=null;
+async function api(path,opt){const r=await fetch(path,{headers:{'content-type':'application/json'},...opt});return r.json();}
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function value(f){const el=document.querySelector('[name="'+f[0]+'"]');return f[2]==='checkbox'?el.checked:el.value;}
+function fill(item={meta:{}}){APP.fields.forEach(f=>{const el=document.querySelector('[name="'+f[0]+'"]');const v=f[0]==='title'?item.title:f[0]==='body'?item.body:f[0]==='status'?item.status:item.meta?.[f[0]];if(f[2]==='checkbox')el.checked=!!v;else el.value=v??'';});editing=item.id||null;}
+function payload(){const meta={};let out={title:'',body:'',status:'',meta};APP.fields.forEach(f=>{const v=value(f);if(f[0]==='title')out.title=v;else if(f[0]==='body')out.body=v;else if(f[0]==='status')out.status=v;else meta[f[0]]=v;});return out;}
+async function saveItem(e){e.preventDefault();const p=payload();await api(editing?'/api/items/'+editing:'/api/items',{method:editing?'PUT':'POST',body:JSON.stringify(p)});editing=null;e.target.reset();load();}
+async function del(id){await api('/api/items/'+id,{method:'DELETE'});load();}
+async function edit(id){fill(items.find(x=>x.id===id));scrollTo(0,0);}
+async function quick(id,patch){const item=items.find(x=>x.id===id);await api('/api/items/'+id,{method:'PUT',body:JSON.stringify({...item,...patch,meta:{...item.meta,...(patch.meta||{})}})});load();}
+function card(x){const m=x.meta||{};let extra='';if(APP.view==='weather')extra=forecast(x);if(APP.view==='markdown')extra='<div class="preview">'+md(x.body)+'</div>';if(APP.view==='qr')extra=qr(x.body,m.color);if(APP.view==='meme')extra='<div class="meme" style="background:'+esc(m.theme||'#334155')+'"><div>'+esc(x.title)+'</div><div>'+esc(m.bottom||'')+'</div></div>';if(APP.view==='units')extra='<p><strong>Result:</strong> '+convert(m.amount,m.kind)+'</p>';if(APP.view==='links')extra='<p><a href="/s/'+esc(x.title)+'">/s/'+esc(x.title)+'</a> -> '+esc(m.url)+' · clicks '+(m.clicks||0)+'</p>';if(APP.view==='passwords')extra='<p><code>'+esc(x.body||makePass(Number(m.length||16),m.symbols))+'</code></p>';return '<article class="card"><h3 class="'+(x.status==='done'?'done':'')+'">'+esc(x.title||'(untitled)')+'</h3><p>'+esc(x.body||'')+'</p>'+metaLine(m,x.status)+extra+'<div class="row"><button onclick="edit('+x.id+')">Edit</button><button class="secondary" onclick="dupe('+x.id+')">Duplicate</button><button class="danger" onclick="del('+x.id+')">Delete</button></div></article>';}
+function metaLine(m,status){return '<p class="muted">'+Object.entries(m).filter(([k,v])=>v!==''&&v!==false).map(([k,v])=>esc(k)+': '+esc(v)).join(' · ')+(status?' · status: '+esc(status):'')+'</p>';}
+function render(){if(APP.view==='kanban'){const cols=['backlog','doing','done'];$('#items').innerHTML='<div class="cols">'+cols.map(c=>'<section><h2>'+c+'</h2>'+items.filter(x=>x.status===c).map(x=>card(x)+'<div class="row"><button onclick="quick('+x.id+',{status:\'backlog\'})">Backlog</button><button onclick="quick('+x.id+',{status:\'doing\'})">Doing</button><button onclick="quick('+x.id+',{status:\'done\'})">Done</button></div>').join('')+'</section>').join('')+'</div>';return;}$('#items').innerHTML=items.map(card).join('')||'<p class="muted">No records yet.</p>';}
+async function load(){items=await api('/api/items');render();}
+async function dupe(id){const x=items.find(i=>i.id===id);await api('/api/items',{method:'POST',body:JSON.stringify({...x,title:x.title+' copy'})});load();}
+function md(s){return esc(s).replace(/^### (.*)$/gm,'<h3>$1</h3>').replace(/^## (.*)$/gm,'<h2>$1</h2>').replace(/^# (.*)$/gm,'<h1>$1</h1>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/^- (.*)$/gm,'<li>$1</li>');}
+function forecast(x){const seed=[...x.title].reduce((a,c)=>a+c.charCodeAt(0),0);const temp=(seed%24)+3;return '<div class="grid"><div class="card">Today<br><strong>'+temp+'°'+esc(x.meta.units||'C')+'</strong></div><div class="card">Tomorrow<br><strong>'+(temp+2)+'°</strong></div><div class="card">Rain<br><strong>'+(seed%70)+'%</strong></div></div>';}
+function convert(a,k){a=Number(a||0);return k==='km_to_miles'?(a*0.621371).toFixed(2)+' mi':k==='kg_to_lb'?(a*2.20462).toFixed(2)+' lb':k==='c_to_f'?((a*9/5)+32).toFixed(2)+' °F':'choose a kind';}
+function makePass(n,sym){const chars='abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'+(sym?'!@#$%&*?':'');return Array.from({length:n||16},(_,i)=>chars[(Date.now()+i*37)%chars.length]).join('');}
+function qr(text,color){let bits=[...String(text||'empty')].map(c=>c.charCodeAt(0));let cells='';for(let y=0;y<17;y++)for(let x=0;x<17;x++){if(((bits[(x+y)%bits.length]||0)+x*y+x+y)%3===0)cells+='<rect x="'+x+'" y="'+y+'" width="1" height="1"/>';}return '<svg viewBox="0 0 17 17" width="180" height="180" style="background:white;fill:'+esc(color||'#111')+'">'+cells+'</svg>';}
+function form(){return APP.fields.map(f=>'<label>'+esc(f[1])+'</label>'+field(f)).join('')+'<div class="row"><button>Save</button><button type="button" class="secondary" onclick="editing=null;formEl.reset()">Clear</button></div>';}
+function field(f){if(f[2]==='textarea')return '<textarea name="'+f[0]+'"></textarea>';if(f[2]==='select')return '<select name="'+f[0]+'">'+f[3].split('|').map(o=>'<option>'+o+'</option>').join('')+'</select>';if(f[2]==='checkbox')return '<input name="'+f[0]+'" type="checkbox">';return '<input name="'+f[0]+'" type="'+f[2]+'">';}
+document.body.innerHTML='<main><header><h1>'+esc(APP.name)+'</h1><p class="muted">'+esc(APP.desc)+'</p></header><section class="panel"><form id="formEl">'+form()+'</form></section><section id="items"></section></main>';formEl.addEventListener('submit',saveItem);load();

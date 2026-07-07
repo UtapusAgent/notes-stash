@@ -1,0 +1,1 @@
+const APP={"slug":"notes-stash","name":"Notes App","desc":"A real notes editor with search, tags, pinning, and Markdown preview.","features":["Notes editor","Search and tags","Pinned notes","SQLite persistence"],"fields":[["title","Title","text"],["body","Note","textarea"],["tags","Tags","text"],["pinned","Pinned","checkbox"]],"view":"notes"};
