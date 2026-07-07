@@ -26,3 +26,14 @@ Open <http://localhost:3000>. Data is stored in SQLite at `data/app.db`.
 - Small self-hosted demo app
 - SQLite-backed CRUD prototype
 - Quick portfolio/sample project
+
+## Development
+
+Run the local verification checks before opening a pull request:
+
+```sh
+python3 -m py_compile server.py
+node --check public/app.js
+node --check public/config.js
+./scripts/smoke_test.sh
+```
