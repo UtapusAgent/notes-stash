@@ -57,6 +57,22 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
         if path == "/health":
             return self.send_json({"ok": True, "app": APP_NAME})
+        if path == "/api/stats":
+            with db() as con:
+                rows = con.execute("select status, meta from items").fetchall()
+            by_status = {}
+            total_amount = 0.0
+            for row in rows:
+                by_status[row["status"] or "none"] = by_status.get(row["status"] or "none", 0) + 1
+                try:
+                    total_amount += float((json.loads(row["meta"] or "{}")).get("amount") or 0)
+                except (TypeError, ValueError):
+                    pass
+            return self.send_json({"count": len(rows), "by_status": by_status, "total_amount": round(total_amount, 2)})
+        if path == "/api/export":
+            with db() as con:
+                rows = con.execute("select * from items order by id").fetchall()
+            return self.send_json({"app": APP_NAME, "version": 1, "items": [row_to_dict(r) for r in rows]})
         if path == "/api/items":
             with db() as con:
                 rows = con.execute("select * from items order by updated_at desc, id desc").fetchall()
@@ -135,11 +151,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("content-type", mimetypes.guess_type(file_path)[0] or "text/plain"); self.send_header("content-length", str(len(data))); self.end_headers(); self.wfile.write(data)
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/items":
+        post_path = urlparse(self.path).path
+        if post_path == "/api/import":
+            payload = self.read_json()
+            imported = 0
+            now = int(time.time())
+            with db() as con:
+                for item in payload.get("items", []):
+                    con.execute("insert into items(title, body, status, meta, created_at, updated_at) values(?,?,?,?,?,?)", (
+                        str(item.get("title", ""))[:500], str(item.get("body", ""))[:20000], str(item.get("status", ""))[:80], json.dumps(item.get("meta", {})), now, now
+                    ))
+                    imported += 1
+            return self.send_json({"imported": imported}, 201)
+        if post_path != "/api/items":
             self.send_error(404); return
         payload = self.read_json(); now = int(time.time())
         with db() as con:
-            cur = con.execute("insert into items(title, body, status, meta, created_at, updated_at) values(?,?,?,?,?,?)", (payload.get("title", ""), payload.get("body", ""), payload.get("status", ""), json.dumps(payload.get("meta", {})), now, now))
+            cur = con.execute("insert into items(title, body, status, meta, created_at, updated_at) values(?,?,?,?,?,?)", (str(payload.get("title", ""))[:500], str(payload.get("body", ""))[:20000], str(payload.get("status", ""))[:80], json.dumps(payload.get("meta", {})), now, now))
             row = con.execute("select * from items where id=?", (cur.lastrowid,)).fetchone()
         self.send_json(row_to_dict(row), 201)
 
@@ -149,7 +177,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404); return
         payload = self.read_json(); now = int(time.time())
         with db() as con:
-            con.execute("update items set title=?, body=?, status=?, meta=?, updated_at=? where id=?", (payload.get("title", ""), payload.get("body", ""), payload.get("status", ""), json.dumps(payload.get("meta", {})), now, int(parts[3])))
+            con.execute("update items set title=?, body=?, status=?, meta=?, updated_at=? where id=?", (str(payload.get("title", ""))[:500], str(payload.get("body", ""))[:20000], str(payload.get("status", ""))[:80], json.dumps(payload.get("meta", {})), now, int(parts[3])))
             row = con.execute("select * from items where id=?", (int(parts[3]),)).fetchone()
         self.send_json(row_to_dict(row) if row else {})
 
