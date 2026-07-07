@@ -37,3 +37,7 @@ node --check public/app.js
 node --check public/config.js
 ./scripts/smoke_test.sh
 ```
+
+## Real Integrations
+
+The app stores user-created data locally in SQLite and does not upload records to external services.
