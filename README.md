@@ -16,16 +16,17 @@ Open <http://localhost:3000>. Data is stored in SQLite at `data/app.db`.
 
 ## Features
 
-- Notes editor
-- Search and tags
-- Pinned notes
+- Two-pane notes editor
+- Live Markdown preview
+- Search, tags, and pinned notes
+- JSON backup export
 - SQLite persistence
 
 ## Use Cases
 
-- Small self-hosted demo app
-- SQLite-backed CRUD prototype
-- Quick portfolio/sample project
+- Personal knowledge base
+- Lightweight customer notes portal
+- Self-hosted Markdown notebook
 
 ## Development
 

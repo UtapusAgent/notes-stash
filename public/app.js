@@ -1,35 +1,222 @@
-const $=s=>document.querySelector(s);let items=[],editing=null,query='',stats={count:0,by_status:{}};
-async function api(path,opt){const r=await fetch(path,{headers:{'content-type':'application/json'},...opt});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||r.statusText);return data}
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function toast(msg){$('#notice').textContent=msg;setTimeout(()=>$('#notice').textContent='',3500)}
-function value(f){const el=document.querySelector('[name="'+f[0]+'"]');return f[2]==='checkbox'?el.checked:el.value}
-function fill(item={meta:{}}){APP.fields.forEach(f=>{const el=document.querySelector('[name="'+f[0]+'"]');const v=f[0]==='title'?item.title:f[0]==='body'?item.body:f[0]==='status'?item.status:item.meta?.[f[0]];if(f[2]==='checkbox')el.checked=!!v;else el.value=v??''});editing=item.id||null;toast(editing?'Editing record #'+editing:'Ready')}
-function payload(){const meta={};let out={title:'',body:'',status:'',meta};APP.fields.forEach(f=>{const v=value(f);if(f[0]==='title')out.title=v;else if(f[0]==='body')out.body=v;else if(f[0]==='status')out.status=v;else meta[f[0]]=v});if(!out.title.trim())throw new Error('Title is required');return out}
-async function saveItem(e){e.preventDefault();try{const p=payload();await api(editing?'/api/items/'+editing:'/api/items',{method:editing?'PUT':'POST',body:JSON.stringify(p)});editing=null;e.target.reset();await load();toast('Saved')}catch(err){toast(err.message)}}
-async function del(id){if(confirm('Delete this record?')){await api('/api/items/'+id,{method:'DELETE'});load()}} async function edit(id){fill(items.find(x=>x.id===id));scrollTo(0,0)}
-async function quick(id,patch){const item=items.find(x=>x.id===id);await api('/api/items/'+id,{method:'PUT',body:JSON.stringify({...item,...patch,meta:{...item.meta,...(patch.meta||{})}})});load()}
-function matches(x){const hay=(x.title+' '+x.body+' '+JSON.stringify(x.meta)).toLowerCase();return hay.includes(query.toLowerCase())}
-function card(x){const m=x.meta||{};let extra='';if(APP.view==='weather')extra=weatherCard(x);if(APP.view==='markdown'||APP.view==='notes')extra='<div class="preview">'+md(x.body)+'</div>';if(APP.view==='qr')extra='<div id="qr-'+x.id+'"></div>';if(APP.view==='meme')extra='<canvas class="meme" width="640" height="360" data-id="'+x.id+'"></canvas><p><button onclick="downloadMeme('+x.id+')">Download PNG</button></p>';if(APP.view==='units')extra='<p><strong>Result:</strong> '+convert(m.amount,m.kind)+'</p>';if(APP.view==='links')extra='<p><a href="/s/'+esc(x.title)+'">/s/'+esc(x.title)+'</a> -> '+esc(m.url)+' · clicks '+(m.clicks||0)+'</p>';if(APP.view==='passwords')extra='<p><code>'+esc(x.body)+'</code></p>';if(APP.view==='blog')extra='<p><a href="/post/'+encodeURIComponent(m.slug||x.title)+'">Open rendered post</a></p>';if(APP.view==='bookmarks')extra='<p><a href="'+esc(m.url)+'" target="_blank" rel="noreferrer">Open bookmark</a></p>';return '<article class="card"><h3 class="'+(x.status==='done'?'done':'')+'">'+esc(x.title||'(untitled)')+'</h3><p>'+esc(x.body||'')+'</p>'+metaLine(m,x.status)+extra+'<div class="row"><button onclick="edit('+x.id+')">Edit</button><button class="secondary" onclick="dupe('+x.id+')">Duplicate</button><button class="danger" onclick="del('+x.id+')">Delete</button></div></article>'}
-function metaLine(m,status){return '<p class="muted">'+Object.entries(m).filter(([k,v])=>v!==''&&v!==false&&k!=='weather').map(([k,v])=>esc(k)+': '+esc(v)).join(' · ')+(status?' · status: '+esc(status):'')+'</p>'}
-function renderStats(){const open=items.filter(x=>!['done','finished','uploaded','published'].includes(x.status)).length;$('#stats').innerHTML='<div class="stat"><span class="muted">Records</span><strong>'+stats.count+'</strong></div><div class="stat"><span class="muted">Visible</span><strong>'+items.filter(matches).length+'</strong></div><div class="stat"><span class="muted">Open-ish</span><strong>'+open+'</strong></div>'+(stats.total_amount?'<div class="stat"><span class="muted">Amount</span><strong>'+stats.total_amount+'</strong></div>':'')}
-function render(){renderStats();const list=items.filter(matches);if(APP.view==='kanban'){const cols=['backlog','doing','done'];$('#items').innerHTML='<div class="cols">'+cols.map(c=>'<section><h2>'+c+'</h2>'+list.filter(x=>x.status===c).map(x=>card(x)+'<div class="row"><button onclick="quick('+x.id+',{status:\'backlog\'})">Backlog</button><button onclick="quick('+x.id+',{status:\'doing\'})">Doing</button><button onclick="quick('+x.id+',{status:\'done\'})">Done</button></div>').join('')+'</section>').join('')+'</div>'}else $('#items').innerHTML='<div class="grid">'+(list.map(card).join('')||'<p class="muted">No records yet.</p>')+'</div>';afterRender(list)}
-async function load(){[items,stats]=await Promise.all([api('/api/items'),api('/api/stats')]);render()} async function dupe(id){const x=items.find(i=>i.id===id);await api('/api/items',{method:'POST',body:JSON.stringify({...x,title:x.title+' copy'})});load()}
-function md(s){return esc(s).replace(/^### (.*)$/gm,'<h3>$1</h3>').replace(/^## (.*)$/gm,'<h2>$1</h2>').replace(/^# (.*)$/gm,'<h1>$1</h1>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/^- (.*)$/gm,'<li>$1</li>')}
-function weatherCard(x){const w=x.meta.weather;if(!w)return '<p class="muted">Use Get real forecast to fetch Open-Meteo data.</p>';return '<div class="grid"><div class="card">Now<br><strong>'+esc(w.temp)+'°</strong></div><div class="card">Humidity<br><strong>'+esc(w.humidity)+'%</strong></div><div class="card">Wind<br><strong>'+esc(w.wind)+' km/h</strong></div></div>'}
-function convert(a,k){a=Number(a||0);return k==='km_to_miles'?(a*0.621371).toFixed(2)+' mi':k==='kg_to_lb'?(a*2.20462).toFixed(2)+' lb':k==='c_to_f'?((a*9/5)+32).toFixed(2)+' °F':'choose a kind'}
-function form(){return APP.fields.map(f=>'<label>'+esc(f[1])+'</label>'+field(f)).join('')+'<div class="row"><button>Save</button><button type="button" class="secondary" onclick="editing=null;formEl.reset()">Clear</button></div>'}
-function field(f){if(f[2]==='textarea')return '<textarea name="'+f[0]+'"></textarea>';if(f[2]==='select')return '<select name="'+f[0]+'">'+f[3].split('|').map(o=>'<option>'+o+'</option>').join('')+'</select>';if(f[2]==='checkbox')return '<input name="'+f[0]+'" type="checkbox">';return '<input name="'+f[0]+'" type="'+f[2]+'">'}
-function tools(){let t='<input id="search" placeholder="Search records">';if(APP.view==='weather')t+='<button onclick="realWeather()">Get real forecast</button>';if(APP.view==='passwords')t+='<button onclick="genPassword()">Generate secure password</button>';if(APP.view==='quotes')t+='<button onclick="externalQuote()">Fetch real quote</button>';if(APP.view==='recipes')t+='<button onclick="mealSearch()">Import recipe by title</button>';if(APP.view==='bookmarks')t+='<button onclick="fetchTitle()">Fetch page title</button>';if(APP.view==='chat')t+='<button onclick="botReply()">Add bot reply</button>';if(APP.view==='files')t+='<input id="filePick" type="file" onchange="fileMeta()">';return t+'<button class="ghost" onclick="exportJson()">Export JSON</button><label class="ghost" style="padding:9px 12px;border-radius:6px;cursor:pointer">Import JSON<input type="file" accept="application/json" style="display:none" onchange="importJson(event)"></label>'}
-async function exportJson(){const data=await api('/api/export');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download=APP.slug+'-backup.json';a.click()}
-async function importJson(e){const file=e.target.files[0];if(!file)return;await api('/api/import',{method:'POST',body:await file.text()});load();toast('Imported backup')}
-async function realWeather(){const city=document.querySelector('[name=title]').value;const units=document.querySelector('[name=units]')?.value||'C';const r=await api('/api/weather?city='+encodeURIComponent(city)+'&units='+units);const c=r.forecast.current;document.querySelector('[name=body]').value='Real Open-Meteo forecast for '+r.place.name;window.pendingWeather={temp:c.temperature_2m,humidity:c.relative_humidity_2m,wind:c.wind_speed_10m};toast('Forecast loaded. Save to store it.')}
-async function genPassword(){const len=document.querySelector('[name=length]')?.value||20;const sym=document.querySelector('[name=symbols]')?.checked!==false;const r=await api('/api/password?length='+len+'&symbols='+sym);document.querySelector('[name=body]').value=r.password}
-async function externalQuote(){const r=await api('/api/external-quote');document.querySelector('[name=title]').value=r.quote;document.querySelector('[name=author]').value=r.author}
-async function mealSearch(){const q=document.querySelector('[name=title]').value;const r=await api('/api/meal?q='+encodeURIComponent(q));document.querySelector('[name=title]').value=r.title;document.querySelector('[name=ingredients]').value=r.ingredients;document.querySelector('[name=body]').value=r.steps}
-async function fetchTitle(){const url=document.querySelector('[name=url]').value;const r=await api('/api/page-title?url='+encodeURIComponent(url));document.querySelector('[name=title]').value=r.title}
-function botReply(){document.querySelector('[name=title]').value='Bot';document.querySelector('[name=body]').value='I read that. Saved locally in SQLite.'}
-function fileMeta(){const f=$('#filePick').files[0];if(!f)return;document.querySelector('[name=title]').value=f.name;document.querySelector('[name=size]').value=Math.ceil(f.size/1024);document.querySelector('[name=kind]').value=f.type||'application/octet-stream'}
-function afterRender(list){if(APP.view==='qr'&&window.QRCode)list.forEach(x=>{const el=$('#qr-'+x.id);if(el&&!el.childElementCount)new QRCode(el,{text:x.body||x.title,width:160,height:160})});if(APP.view==='meme')list.forEach(drawMeme)}
-function drawMeme(x){const c=document.querySelector('canvas[data-id="'+x.id+'"]');if(!c)return;const ctx=c.getContext('2d'),m=x.meta||{};ctx.fillStyle=m.theme||'#334155';ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle='white';ctx.strokeStyle='black';ctx.lineWidth=6;ctx.textAlign='center';ctx.font='bold 42px system-ui';[x.title,m.bottom||''].forEach((text,i)=>{const y=i?310:60;ctx.strokeText(text,c.width/2,y);ctx.fillText(text,c.width/2,y)})}
-function downloadMeme(id){const c=document.querySelector('canvas[data-id="'+id+'"]');const a=document.createElement('a');a.download='meme.png';a.href=c.toDataURL();a.click()}
-document.body.innerHTML='<main><header class="top"><div><h1>'+esc(APP.name)+'</h1><p class="muted">'+esc(APP.desc)+'</p></div><div id="notice" class="notice"></div></header><div id="stats" class="stats"></div><div class="layout"><section class="panel"><div class="toolbar row">'+tools()+'</div><form id="formEl">'+form()+'</form></section><section id="items"></section></div></main>';$('#search').oninput=e=>{query=e.target.value;render()};formEl.addEventListener('submit',e=>{if(window.pendingWeather){e.preventDefault();const p=payload();p.meta.weather=window.pendingWeather;api(editing?'/api/items/'+editing:'/api/items',{method:editing?'PUT':'POST',body:JSON.stringify(p)}).then(()=>{window.pendingWeather=null;editing=null;formEl.reset();load();toast('Saved forecast')}).catch(err=>toast(err.message))}else saveItem(e)});load();
+const $ = (selector) => document.querySelector(selector);
+
+let notes = [];
+let selectedId = null;
+let query = "";
+let activeTag = "";
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[char]);
+}
+
+function markdown(value) {
+  return escapeHtml(value)
+    .replace(/^### (.*)$/gm, "<h3>$1</h3>")
+    .replace(/^## (.*)$/gm, "<h2>$1</h2>")
+    .replace(/^# (.*)$/gm, "<h1>$1</h1>")
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.*?)\*/g, "<em>$1</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/^- (.*)$/gm, "<li>$1</li>")
+    .replace(/\n/g, "<br>");
+}
+
+async function api(path, options) {
+  const response = await fetch(path, {
+    headers: { "content-type": "application/json" },
+    ...options,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+
+function currentNote() {
+  return notes.find((note) => note.id === selectedId) || null;
+}
+
+function noteTags(note) {
+  return String(note.meta?.tags || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function allTags() {
+  return [...new Set(notes.flatMap(noteTags))].sort((a, b) => a.localeCompare(b));
+}
+
+function filteredNotes() {
+  const needle = query.toLowerCase();
+  return notes
+    .filter((note) => {
+      const haystack = `${note.title} ${note.body} ${note.meta?.tags || ""}`.toLowerCase();
+      return !needle || haystack.includes(needle);
+    })
+    .filter((note) => !activeTag || noteTags(note).includes(activeTag))
+    .sort((a, b) => Number(Boolean(b.meta?.pinned)) - Number(Boolean(a.meta?.pinned)) || b.updated_at - a.updated_at);
+}
+
+function render() {
+  const note = currentNote();
+  $("#app").innerHTML = `
+    <aside class="notes-sidebar">
+      <div class="row">
+        <button id="newNote">New note</button>
+        <button class="ghost" id="exportNotes">Export</button>
+      </div>
+      <input id="search" placeholder="Search notes" value="${escapeHtml(query)}">
+      <div class="tag-list">
+        <button class="${activeTag ? "ghost" : ""}" data-tag="">All</button>
+        ${allTags().map((tag) => `<button class="${activeTag === tag ? "" : "ghost"}" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`).join("")}
+      </div>
+      <div class="note-list">
+        ${filteredNotes().map((entry) => `
+          <button class="note-row ${entry.id === selectedId ? "selected" : ""}" data-id="${entry.id}">
+            <strong>${entry.meta?.pinned ? "Pinned · " : ""}${escapeHtml(entry.title || "Untitled")}</strong>
+            <span>${escapeHtml((entry.body || "").slice(0, 90))}</span>
+          </button>
+        `).join("") || `<p class="muted">No notes yet.</p>`}
+      </div>
+    </aside>
+    <section class="editor-panel">
+      ${note ? editor(note) : emptyState()}
+    </section>
+  `;
+  bindEvents();
+}
+
+function emptyState() {
+  return `
+    <div class="empty">
+      <h2>Select or create a note</h2>
+      <p class="muted">Notes are stored in SQLite. Use Markdown for headings, lists, emphasis, and inline code.</p>
+    </div>
+  `;
+}
+
+function editor(note) {
+  return `
+    <form id="noteForm" class="note-form">
+      <div class="row space">
+        <input id="title" placeholder="Note title" value="${escapeHtml(note.title)}" required>
+        <label class="pin-toggle"><input id="pinned" type="checkbox" ${note.meta?.pinned ? "checked" : ""}> Pin</label>
+      </div>
+      <input id="tags" placeholder="tags, comma separated" value="${escapeHtml(note.meta?.tags || "")}">
+      <div class="editor-grid">
+        <textarea id="body" placeholder="Write the note...">${escapeHtml(note.body)}</textarea>
+        <article id="preview" class="preview">${markdown(note.body)}</article>
+      </div>
+      <div class="row">
+        <button>Save</button>
+        <button type="button" class="danger" id="deleteNote">Delete</button>
+      </div>
+    </form>
+  `;
+}
+
+function bindEvents() {
+  $("#newNote").addEventListener("click", createNote);
+  $("#exportNotes").addEventListener("click", exportNotes);
+  $("#search").addEventListener("input", (event) => {
+    query = event.target.value;
+    render();
+  });
+  document.querySelectorAll("[data-tag]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeTag = button.dataset.tag;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedId = Number(button.dataset.id);
+      render();
+    });
+  });
+  if ($("#noteForm")) {
+    $("#noteForm").addEventListener("submit", saveNote);
+    $("#deleteNote").addEventListener("click", deleteNote);
+    $("#body").addEventListener("input", () => {
+      $("#preview").innerHTML = markdown($("#body").value);
+    });
+  }
+}
+
+async function loadNotes() {
+  notes = await api("/api/items");
+  if (selectedId && !notes.some((note) => note.id === selectedId)) selectedId = null;
+  if (!selectedId && notes.length) selectedId = filteredNotes()[0]?.id || notes[0].id;
+  render();
+}
+
+async function createNote() {
+  const created = await api("/api/items", {
+    method: "POST",
+    body: JSON.stringify({
+      title: "Untitled note",
+      body: "",
+      status: "active",
+      meta: { tags: "", pinned: false },
+    }),
+  });
+  selectedId = created.id;
+  await loadNotes();
+}
+
+async function saveNote(event) {
+  event.preventDefault();
+  const note = currentNote();
+  if (!note) return;
+  await api(`/api/items/${note.id}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      ...note,
+      title: $("#title").value.trim(),
+      body: $("#body").value,
+      status: "active",
+      meta: {
+        ...note.meta,
+        tags: $("#tags").value.trim(),
+        pinned: $("#pinned").checked,
+      },
+    }),
+  });
+  await loadNotes();
+}
+
+async function deleteNote() {
+  const note = currentNote();
+  if (!note || !confirm("Delete this note?")) return;
+  await api(`/api/items/${note.id}`, { method: "DELETE" });
+  selectedId = null;
+  await loadNotes();
+}
+
+async function exportNotes() {
+  const data = await api("/api/export");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  link.download = "notes-stash-backup.json";
+  link.click();
+}
+
+document.body.innerHTML = `
+  <main class="notes-app">
+    <header class="top">
+      <div>
+        <h1>${escapeHtml(APP.name)}</h1>
+        <p class="muted">${escapeHtml(APP.desc)}</p>
+      </div>
+    </header>
+    <div id="app" class="notes-layout"></div>
+  </main>
+`;
+
+loadNotes();
