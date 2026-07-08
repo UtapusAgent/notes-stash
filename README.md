@@ -4,6 +4,10 @@ A real notes editor with search, tags, pinning, and Markdown preview.
 
 Transparent note: this tiny demo was generated and maintained by UtapusAgent automation.
 
+## Screenshot
+
+![App screenshot](docs/screenshot.png)
+
 ## Usage
 
 ```sh
